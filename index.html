@@ -1,0 +1,976 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#08111f">
+  <meta name="description" content="VisionGuide - voice-first AI assistive navigation application prototype">
+  <title>VisionGuide • Voice-First Assistive Navigation</title>
+
+  <!-- Browser ML: TensorFlow.js + COCO-SSD. COCO-SSD supports 80 COCO object classes. -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
+
+  <style>
+    :root{
+      --bg:#08111f;--panel:#0e1a2c;--panel2:#12233a;--line:#263a58;
+      --text:#f7fbff;--muted:#b2c0d2;--blue:#78a9ff;--blue2:#4e86f5;
+      --green:#54d995;--yellow:#ffd070;--red:#ff6978;--radius:20px;
+      --shadow:0 20px 60px rgba(0,0,0,.22);
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{
+      margin:0;background:radial-gradient(circle at 20% 0,#122a4b 0,#08111f 38%,#06101b 100%);
+      color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+      min-height:100vh;line-height:1.4
+    }
+    button,input,select{font:inherit}
+    button{cursor:pointer}
+    button:focus-visible,input:focus-visible,select:focus-visible{
+      outline:3px solid rgba(120,169,255,.48);outline-offset:2px
+    }
+    .wrap{width:min(1180px,100%);margin:auto;padding:14px 14px 120px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 2px 14px}
+    .brand{display:flex;gap:11px;align-items:center}
+    .logo{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;
+      background:linear-gradient(135deg,var(--blue2),var(--blue));color:#06101b;font-weight:1000;
+      box-shadow:0 10px 30px rgba(78,134,245,.26)}
+    .brand h1{font-size:1.08rem;margin:0}.brand p{margin:2px 0 0;color:var(--muted);font-size:.78rem}
+    .chips{display:flex;flex-wrap:wrap;gap:7px;justify-content:flex-end}.chip{
+      border:1px solid var(--line);background:rgba(255,255,255,.035);border-radius:999px;
+      padding:7px 10px;color:var(--muted);font-size:.74rem;display:inline-flex;gap:6px;align-items:center
+    }
+    .dot{width:8px;height:8px;border-radius:50%;background:#75859a}.dot.g{background:var(--green)}.dot.y{background:var(--yellow)}.dot.r{background:var(--red)}
+    .hero{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}
+    .card{background:linear-gradient(180deg,rgba(18,35,58,.97),rgba(12,25,42,.97));
+      border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+    .heroMain{padding:23px;min-height:350px;position:relative;overflow:hidden}
+    .heroMain:after{content:"";position:absolute;right:-120px;bottom:-160px;width:400px;height:400px;
+      background:radial-gradient(circle,rgba(78,134,245,.22),transparent 66%);pointer-events:none}
+    .eyebrow{color:var(--blue);font-size:.74rem;text-transform:uppercase;letter-spacing:.13em;font-weight:900}
+    .heroMain h2{font-size:clamp(2rem,6vw,3.4rem);line-height:1.02;margin:7px 0 12px;max-width:13ch}
+    .heroMain p{color:var(--muted);max-width:60ch;margin:0 0 20px}
+    .voiceState{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:.87rem;margin-top:15px}
+    .pulse{width:11px;height:11px;border-radius:50%;background:var(--blue);box-shadow:0 0 0 0 rgba(120,169,255,.4)}
+    .pulse.live{animation:pulse 1.5s infinite}
+    @keyframes pulse{70%{box-shadow:0 0 0 11px rgba(120,169,255,0)}100%{box-shadow:0 0 0 0 rgba(120,169,255,0)}}
+    .stageWrap{padding:13px}.stage{position:relative;aspect-ratio:4/3;min-height:330px;border-radius:16px;overflow:hidden;
+      border:1px solid #29405f;background:#050a11;display:grid;place-items:center}
+    #video{width:100%;height:100%;object-fit:contain;display:block}
+    #canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;object-fit:contain}
+    .sim{position:absolute;inset:0;background:linear-gradient(#6f8ead 0 42%,#405365 42% 60%,#273441 60% 100%)}
+    .road{position:absolute;left:20%;right:20%;bottom:0;height:58%;clip-path:polygon(34% 0,66% 0,100% 100%,0 100%);background:#5c6772}
+    .person{position:absolute;left:31%;top:39%;width:48px;height:110px;border-radius:22px 22px 10px 10px;background:#1f2b3b}
+    .person:before{content:"";position:absolute;left:9px;top:-22px;width:30px;height:30px;border-radius:50%;background:#d29b79}
+    .box{position:absolute;left:54%;top:51%;width:72px;height:84px;border-radius:9px;background:#d48b3a;box-shadow:0 18px 34px rgba(0,0,0,.35)}
+    .stageBadge,.stageBottom{position:absolute;left:10px;right:10px;display:flex;gap:7px;flex-wrap:wrap}
+    .stageBadge{top:10px}.stageBottom{bottom:10px}.overlay{
+      padding:7px 9px;border-radius:9px;background:rgba(3,8,15,.78);border:1px solid rgba(255,255,255,.11);
+      backdrop-filter:blur(8px);font-size:.72rem
+    }
+    .bar{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.btn{
+      min-height:50px;padding:11px 16px;border-radius:14px;border:1px solid var(--line);background:#122239;color:var(--text);font-weight:850
+    }
+    .btn:hover{filter:brightness(1.08)}.btn.primary{background:linear-gradient(135deg,#4c86f4,#78a9ff);color:#06101b;border:0}
+    .btn.warn{background:rgba(255,208,112,.1);border-color:rgba(255,208,112,.28)}.btn.danger{background:rgba(255,105,120,.11);border-color:rgba(255,105,120,.3)}
+    .btn.big{min-width:190px}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;margin-top:14px}
+    .span4{grid-column:span 4}.span5{grid-column:span 5}.span7{grid-column:span 7}.span8{grid-column:span 8}.span12{grid-column:span 12}
+    .panel{padding:17px}.panel h3{margin:0;font-size:1rem}.sub{margin:4px 0 13px;color:var(--muted);font-size:.81rem}
+    .guidance{border-color:rgba(84,217,149,.22);background:linear-gradient(180deg,rgba(84,217,149,.08),rgba(12,25,42,.97))}
+    .guide{display:flex;gap:12px}.guideIcon{width:45px;height:45px;border-radius:13px;display:grid;place-items:center;
+      background:rgba(84,217,149,.12);border:1px solid rgba(84,217,149,.18);flex:0 0 auto;font-size:1.2rem}
+    .guideText strong{display:block;margin-bottom:3px}.guideText p{margin:0;color:#d9e6f5;line-height:1.5}
+    .meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}.meta .chip{font-size:.69rem;padding:5px 8px}
+    .form{display:flex;gap:8px}.form>*:first-child{flex:1}
+    input,select{min-height:48px;border:1px solid var(--line);background:#091424;color:var(--text);border-radius:13px;padding:11px 13px;width:100%}
+    .quick{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.quick button{
+      min-height:67px;text-align:left;border:1px solid var(--line);background:#091424;border-radius:14px;color:var(--text);padding:10px 11px;font-weight:800
+    }.quick small{display:block;color:var(--muted);font-weight:500;margin-top:3px}
+    .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.stat{padding:11px;border:1px solid var(--line);background:#091424;border-radius:13px}
+    .stat span{display:block;color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.06em}.stat strong{display:block;margin-top:4px;font-size:.92rem}
+    .lines{display:grid;gap:0}.line{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid rgba(38,58,88,.65);font-size:.82rem}.line:last-child{border-bottom:0}.line span{color:var(--muted)}
+    .log{max-height:230px;overflow:auto;display:grid;gap:7px}.event{border:1px solid var(--line);background:#091424;border-radius:12px;padding:9px 10px;font-size:.76rem}.event time{display:block;color:var(--muted);font-size:.65rem;margin-bottom:2px}
+    .alert{display:none;align-items:center;justify-content:space-between;gap:12px;padding:13px 15px;border-radius:15px;margin-bottom:14px;
+      background:rgba(255,105,120,.10);border:1px solid rgba(255,105,120,.35)}.alert.show{display:flex}.alert strong{color:#ffd8dd}
+    .sr{position:absolute!important;width:1px!important;height:1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important}
+    footer{text-align:center;color:var(--muted);font-size:.7rem;margin-top:15px}
+    .toast{position:fixed;left:50%;bottom:16px;transform:translate(-50%,120px);width:min(600px,calc(100% - 28px));
+      background:rgba(9,20,36,.97);border:1px solid var(--line);border-radius:14px;padding:13px 15px;box-shadow:var(--shadow);z-index:100;transition:.2s}
+    .toast.show{transform:translate(-50%,0)}.toast strong{display:block}.toast p{margin:3px 0 0;color:var(--muted);font-size:.8rem}
+    .credit{font-size:.67rem;color:var(--muted);line-height:1.45;margin-top:10px}
+    .hidden{display:none!important}
+    body.contrast{--bg:#000;--panel:#000;--panel2:#050505;--text:#fff;--muted:#fff;--line:#fff}
+    html.big{font-size:118%}
+    body.contrast .card,body.contrast .stat,body.contrast .event,body.contrast .quick button,body.contrast .btn,body.contrast input,body.contrast select{background:#000;border-color:#fff;color:#fff}
+    body.contrast .btn.primary{background:#ffeb3b;color:#000}
+    body.contrast .guideText p,body.contrast .sub{color:#fff}
+    @media(max-width:900px){.hero{grid-template-columns:1fr}.span4,.span5,.span7,.span8,.span12{grid-column:span 12}}
+    @media(max-width:620px){
+      .wrap{padding:10px 10px 115px}.brand p{display:none}.heroMain{padding:18px}.stage{min-height:270px}
+      .bar .btn{flex:1}.btn.big{min-width:0;flex-basis:100%}.form{flex-direction:column}.quick{grid-template-columns:1fr 1fr}
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo" aria-hidden="true">VG</div>
+      <div><h1>VisionGuide</h1><p>Voice-first AI assistive navigation prototype</p></div>
+    </div>
+    <div class="chips" aria-live="polite">
+      <span class="chip"><i class="dot g" id="netDot"></i><span id="netText">Online</span></span>
+      <span class="chip"><i class="dot" id="protoDot"></i><span id="protoText">Prototype: Simulation</span></span>
+    </div>
+  </header>
+
+  <div class="alert" id="alert" role="alert">
+    <div><strong>Safety alert</strong><div id="alertText">Obstacle detected ahead.</div></div>
+    <button class="btn danger" id="dismissAlert">Dismiss</button>
+  </div>
+
+  <section class="hero">
+    <article class="card heroMain">
+      <div class="eyebrow">See → Understand → Decide → Guide</div>
+      <h2>Use your voice. Let VisionGuide do the rest.</h2>
+      <p>
+        The main workflow is voice-first and automatic. Use the microphone to command the app, GPS for location,
+        the phone camera for live visual detection, and the future prototype adapter for wearable hardware.
+      </p>
+      <div class="bar">
+        <button class="btn primary big" id="assistBtn" aria-pressed="false">Start Auto Assist</button>
+        <button class="btn" id="voiceBtn">🎙 Speak Command</button>
+        <button class="btn" id="repeatBtn">🔊 Repeat</button>
+        <button class="btn danger" id="sosBtn">🆘 Share Location</button>
+      </div>
+      <div class="voiceState" aria-live="polite"><span class="pulse" id="pulse"></span>
+        <span>System: <strong id="systemState">READY</strong></span> ·
+        <span>Voice: <strong id="voiceState">READY</strong></span>
+      </div>
+    </article>
+
+    <article class="card stageWrap">
+      <div class="stage">
+        <div class="sim" id="sim"><div class="road"></div><div class="person"></div><div class="box"></div></div>
+        <video id="video" autoplay muted playsinline class="hidden"></video>
+        <canvas id="canvas"></canvas>
+        <div class="stageBadge"><span class="overlay" id="cameraBadge">Simulation Camera</span></div>
+        <div class="stageBottom">
+          <span class="overlay" id="cameraState">Ready</span>
+          <span class="overlay" id="aiState">AI: auto-monitoring</span>
+          <span class="overlay" id="detState">No detections</span>
+        </div>
+      </div>
+      <div class="bar">
+        <button class="btn" id="cameraBtn">📷 Enable Phone Camera</button>
+        <button class="btn" id="detectBtn">🤖 Analyze Now</button>
+      </div>
+    </article>
+  </section>
+
+  <section class="grid">
+    <article class="card panel span7 guidance">
+      <h3>Current Guidance</h3><p class="sub">The most important instruction is presented first and spoken aloud.</p>
+      <div class="guide"><div class="guideIcon" aria-hidden="true">🔊</div>
+        <div class="guideText">
+          <strong id="guideTitle">Ready</strong><p id="guideText">Say “start assist” to begin.</p>
+          <div class="meta">
+            <span class="chip">Priority: <b id="metaPriority">Normal</b></span>
+            <span class="chip">Source: <b id="metaSource">Simulation</b></span>
+            <span class="chip">Updated: <b id="metaTime">—</b></span>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <article class="card panel span5">
+      <h3>Live System Status</h3><p class="sub">Browser capabilities and active services.</p>
+      <div class="stats">
+        <div class="stat"><span>GPS</span><strong id="gpsStat">Standby</strong></div>
+        <div class="stat"><span>Camera</span><strong id="cameraStat">Simulation</strong></div>
+        <div class="stat"><span>AI Model</span><strong id="modelStat">Loading…</strong></div>
+        <div class="stat"><span>Audio</span><strong id="audioStat">Ready</strong></div>
+      </div>
+    </article>
+
+    <article class="card panel span5">
+      <h3>Voice Command Center</h3><p class="sub">Core actions work from speech; typing is the fallback.</p>
+      <label class="sr" for="command">Command</label>
+      <div class="form"><input id="command" placeholder="e.g. navigate to the nearest coffee shop"><button class="btn primary" id="send">Send</button></div>
+      <div style="height:9px"></div>
+      <div class="quick">
+        <button data-cmd="what is in front of me">👁 What’s ahead?<small>Analyze environment</small></button>
+        <button data-cmd="is the path clear">🛣 Path clear?<small>Movement check</small></button>
+        <button data-cmd="where am i">📍 Where am I?<small>GPS status</small></button>
+        <button data-cmd="navigate to the nearest coffee shop">☕ Nearest coffee shop<small>Place + navigation</small></button>
+      </div>
+    </article>
+
+    <article class="card panel span7">
+      <h3>Navigation</h3><p class="sub">Voice destination search + GPS guidance. A configurable routing provider can be connected later.</p>
+      <div class="form"><input id="destination" aria-label="Destination" placeholder="Destination"><button class="btn primary" id="navigate">Navigate</button></div>
+      <div style="height:9px"></div>
+      <div class="stats">
+        <div class="stat"><span>Destination</span><strong id="destStat">None</strong></div>
+        <div class="stat"><span>Distance</span><strong id="distStat">—</strong></div>
+        <div class="stat"><span>Direction</span><strong id="dirStat">—</strong></div>
+        <div class="stat"><span>Mode</span><strong id="navMode">Direct guidance</strong></div>
+      </div>
+    </article>
+
+    <article class="card panel span5">
+      <h3>Future Prototype Bridge</h3><p class="sub">The app can use a simulated wearable now and a real adapter later.</p>
+      <div class="lines">
+        <div class="line"><span>Device</span><b id="device">Simulation Adapter</b></div>
+        <div class="line"><span>Connection</span><b id="conn">Virtual</b></div>
+        <div class="line"><span>Camera</span><b>Supported</b></div>
+        <div class="line"><span>Microphone</span><b>Supported</b></div>
+        <div class="line"><span>Audio Output</span><b>Supported</b></div>
+        <div class="line"><span>External Sensors</span><b>Ready</b></div>
+      </div>
+      <button class="btn" id="connect" style="width:100%;margin-top:10px">🔗 Toggle Simulated Prototype</button>
+    </article>
+
+    <article class="card panel span7">
+      <h3>Accessibility</h3><p class="sub">Keep the screen secondary to speech and audio.</p>
+      <div class="form">
+        <select id="verbosity" aria-label="Speech verbosity"><option value="low">Low speech</option><option value="normal" selected>Normal speech</option><option value="high">Detailed speech</option></select>
+        <select id="rate" aria-label="Speech rate"><option value=".85">Slow</option><option value="1" selected>Normal</option><option value="1.15">Fast</option></select>
+      </div>
+      <div style="height:9px"></div>
+      <div class="bar"><button class="btn" id="contrast">◐ High Contrast</button><button class="btn" id="large">A+ Larger Text</button></div>
+    </article>
+
+    <article class="card panel span5">
+      <h3>Event Log</h3><p class="sub">Useful during prototype testing and debugging.</p>
+      <div class="log" id="log"></div>
+    </article>
+
+    <article class="card panel span12">
+      <h3>Hardware-Ready Test Scenarios</h3><p class="sub">Simulated sensor/AI events using the same internal data format the future prototype can send.</p>
+      <div class="quick" style="grid-template-columns:repeat(4,1fr)">
+        <button data-scenario="obstacle">⚠️ Obstacle ahead<small>0.8 m / front</small></button>
+        <button data-scenario="person">🧍 Person ahead<small>1.5 m / center</small></button>
+        <button data-scenario="clear">✅ Path clear<small>No priority hazard</small></button>
+        <button data-scenario="turn">🧭 Turn left<small>10 m ahead</small></button>
+      </div>
+      <div class="credit">
+        Map/place lookup uses OpenStreetMap Nominatim only for explicit user searches and should be replaced with a managed/proxy service for a real deployment.
+        Nominatim has request-rate and attribution requirements. Place and route data © OpenStreetMap contributors. Distance and detection estimates are approximate and do not replace a cane or guide dog. 
+      </div>
+    </article>
+  </section>
+  <footer>VisionGuide prototype • Automatic live vision • Voice-first • Prototype-compatible</footer>
+</div>
+
+<div class="toast" id="toast"><strong id="toastTitle">VisionGuide</strong><p id="toastText">Ready.</p></div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ================================================================
+  // VisionGuide: voice-first architecture
+  // Core layers:
+  // Voice -> Intent -> Services -> Decision Engine -> Audio Guidance
+  // Hardware adapters are isolated from AI/navigation logic.
+  // ================================================================
+
+  const S = {
+    assist:false, listening:false, stream:null, model:null, modelLoading:false,
+    camera:"simulation", prototype:false, lastSpeech:"Say “start assist” to begin.",
+    lastTitle:"Ready", lastPriority:"Normal", lastSource:"Simulation",
+    watchId:null, pos:null, destination:null, navTimer:null, lastSpokenAt:0,
+    speakCooldownMs:4500, detectionBusy:false, lastDangerAt:0,
+    recognition:null, recognitionStarting:false,
+    speechRetry:0, userActivatedVoice:false,
+    liveDetection:true, lastAnnouncements:new Map(), lastFrameAt:0,
+    consecutiveFrames:0, stableDetections:new Map(), cameraAutoStarting:false,
+    micDenied:false, pending:null, route:null, explicitUntil:0
+  };
+
+  const $ = id => document.getElementById(id);
+  const lsGet=k=>{try{return localStorage.getItem(k)}catch{return null}};
+  const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
+  const escapeHTML = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  const tnow = () => new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+  const source = () => S.prototype ? "Prototype Adapter" : (S.camera === "phone" ? "Phone Camera" : "Simulation");
+
+  function log(msg){
+    const el=document.createElement("div"); el.className="event";
+    el.innerHTML=`<time>${tnow()}</time>${escapeHTML(msg)}`;
+    $("log").prepend(el); while($("log").children.length>30) $("log").lastChild.remove();
+  }
+  let toastTimer;
+  function toast(title,msg){
+    $("toastTitle").textContent=title; $("toastText").textContent=msg; $("toast").classList.add("show");
+    clearTimeout(toastTimer); toastTimer=setTimeout(()=>$("toast").classList.remove("show"),3000);
+  }
+  function setState(state){
+    $("systemState").textContent=state;
+    $("pulse").classList.toggle("live", ["LISTENING","ASSISTING","PROCESSING"].includes(state));
+  }
+  function setVoiceState(s){ $("voiceState").textContent=s; }
+
+  let speakToken=0;
+  function speak(text, opts={}){
+    if(!("speechSynthesis" in window)){ $("audioStat").textContent="Unsupported"; return; }
+    const priority=opts.priority||"Normal";
+    const force=!!opts.force;
+    if(!force && Date.now()-S.lastSpokenAt<S.speakCooldownMs && priority==="Normal") return;
+
+    // Do not let the voice recognizer hear its own spoken output.
+    if(S.listening) stopListening();
+
+    window.speechSynthesis.cancel();
+    const my=++speakToken;
+    const u=new SpeechSynthesisUtterance(text);
+    u.lang=navigator.language||"en-US";
+    u.rate=Number(lsGet("vg_rate")||"1");
+    u.volume=1; u.pitch=1;
+
+    const resumeVoice = () => {
+      if(my!==speakToken) return;
+      $("audioStat").textContent="Ready";
+      if((S.assist||S.pending) && S.recognition) scheduleListening();
+    };
+
+    u.onstart=()=>{ $("audioStat").textContent="Speaking"; };
+    u.onend=resumeVoice;
+    u.onerror=resumeVoice;
+
+    window.speechSynthesis.speak(u);
+    S.lastSpokenAt=Date.now();
+    S.lastSpeech=text;
+  }
+
+  function guide(title,text,priority="Normal",src=source(),speakIt=false){
+    S.lastTitle=title; S.lastSpeech=text; S.lastPriority=priority; S.lastSource=src;
+    $("guideTitle").textContent=title; $("guideText").textContent=text;
+    $("metaPriority").textContent=priority; $("metaSource").textContent=src; $("metaTime").textContent=tnow();
+    if(speakIt) speak(text,{priority,force:priority==="Urgent"||Date.now()<(S.explicitUntil||0)});
+    log(`${title}: ${text}`);
+  }
+
+  // ------------------------ Voice recognition ---------------------
+  function initVoice(){
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){ setVoiceState("UNSUPPORTED"); $("voiceBtn").textContent="🎙 Voice unavailable"; log("SpeechRecognition unavailable; text fallback remains."); return; }
+    S.recognition=new SR();
+    S.recognition.lang=navigator.language||"en-US";
+    S.recognition.interimResults=false;
+    S.recognition.continuous=false;
+    S.recognition.onstart=()=>{
+      S.listening=true; S.recognitionStarting=false; setVoiceState("LISTENING"); setState("LISTENING");
+      $("voiceBtn").textContent="🛑 Listening…"; log("Voice recognition listening.");
+    };
+    S.recognition.onresult=e=>{
+      const text=e.results?.[0]?.[0]?.transcript||"";
+      $("command").value=text; log(`Heard: ${text}`); routeIntent(text);
+    };
+    S.recognition.onerror=e=>{
+      S.recognitionStarting=false; setVoiceState("READY"); log(`Voice error: ${e.error||"unknown"}`);
+      if(e.error==="not-allowed"||e.error==="service-not-allowed") S.micDenied=true;
+      if(e.error==="not-allowed") toast("Microphone permission", "Allow microphone access and try again.");
+    };
+    S.recognition.onend=()=>{
+      S.listening=false; $("voiceBtn").textContent="🎙 Speak Command";
+      if(S.assist){ setVoiceState("READY"); setState("ASSISTING"); scheduleListening(); }
+      else { setVoiceState("READY"); setState("READY"); }
+    };
+    log("Voice service ready.");
+  }
+  function startListening(){
+    if(S.micDenied) return;
+    if(!S.recognition){ toast("Voice unavailable","Use the text command field on this browser."); return; }
+    if(S.listening||S.recognitionStarting) return;
+    try{ S.recognitionStarting=true; S.userActivatedVoice=true; S.recognition.start(); }catch(e){S.recognitionStarting=false;log("Recognition start: "+e.message);}
+  }
+  function scheduleListening(){
+    if(S.pending&&Date.now()-S.pending.t>15000) S.pending=null;
+    if((!S.assist&&!S.pending)||!S.recognition||S.micDenied) return;
+    clearTimeout(S._listenTimer);
+    if(window.speechSynthesis?.speaking){S._listenTimer=setTimeout(scheduleListening,500);return;}
+    S._listenTimer=setTimeout(startListening,350);
+  }
+  function stopListening(){ try{S.recognition?.stop()}catch{} }
+
+  $("voiceBtn").onclick=()=>{S.micDenied=false;startListening();};
+  if(!window.isSecureContext||location.protocol==="file:") log("Tip: open via https:// or http://localhost so permissions are remembered.");
+
+  function routeIntent(raw){
+    S.explicitUntil=Date.now()+6000;
+    let c=raw.trim().toLowerCase();
+    if(!c) return;
+    if(S.pending && Date.now()-S.pending.t<15000) c=S.pending.text+" "+c;
+    S.pending=null;
+    // Cut-off phrases like "tell me" wait for the rest of the sentence.
+    if(/^(tell me|can you|could you|please|what|what is|what's|hey|okay|ok|show me|i want to know|describe|is there|do you see)\W*$/i.test(c)){
+      S.pending={text:c,t:Date.now()};
+      guide("Listening","Go ahead, I'm listening.","Normal","Voice",true); return;
+    }
+    if(/\b(stop|end|turn off)\b.*(assist|assistance|navigation|guide)/i.test(c)){ stopAssist(); return; }
+    if(/^(stop|cancel)$/i.test(c)){ stopAssist(); return; }
+    if(/(start|begin|turn on).*(assist|assistance|guide)/i.test(c)){ startAssist(); return; }
+    if(/emergency|\bsos\b|share.*location|send.*location/i.test(c)){ shareLocation(); return; }
+    if(/repeat|say that again/i.test(c)){ speak(S.lastSpeech,{force:true}); return; }
+    if(/what.*(ahead|front|see|around|near|here|there|going on)|(tell|describe|show).*(around|ahead|front|surround|environment|scene|see|what)|look(ing)? (around|ahead)|anyone|anything|obstacle|who is/i.test(c)){ analyzeNow(true); return; }
+    if(/(path|way|road|route|street).*(clear|safe|blocked)|(clear|safe|blocked).*(path|way|walk|go)|can i (walk|go|move|cross|keep going)|safe to/i.test(c)){ pathCheck(true); return; }
+    if(/where.*i am|my location|where am i/i.test(c)){ announceLocation(); return; }
+    if(/navigate|take me|directions|go to/i.test(c)){
+      let d=c.replace(/navigate to|navigate|take me to|take me|directions to|go to/gi,"").trim();
+      if(!d) d=$("destination").value.trim()||"nearest coffee shop";
+      startNavigation(d); return;
+    }
+    if(/connect.*prototype|connect.*device/i.test(c)){ togglePrototype(); return; }
+    if(/camera|use.*phone camera/i.test(c)){ enableCamera(); return; }
+    if(/help|what can i say/i.test(c)){
+      guide("Voice help",
+        "You can say: start assist, what is in front of me, is the path clear, where am I, navigate to a place, repeat, or stop assist.",
+        "Normal","Voice",true); return;
+    }
+    guide("Not understood",`I heard ${raw}. Say help to hear what I can do.`,"Normal","Voice",true);
+  }
+
+  $("send").onclick=()=>routeIntent($("command").value);
+  $("command").onkeydown=e=>{if(e.key==="Enter") routeIntent(e.target.value)};
+  document.querySelectorAll("[data-cmd]").forEach(b=>b.onclick=()=>routeIntent(b.dataset.cmd));
+
+  async function startAssist(){
+    if(S.assist) return;
+    S.assist=true; try{S.wake=await navigator.wakeLock?.request('screen')}catch{}
+    $("assistBtn").textContent="Stop Auto Assist";
+    $("assistBtn").setAttribute("aria-pressed","true");
+    setState("ASSISTING"); setVoiceState("READY");
+
+    // Start core services automatically.
+    startGPS();
+    loadModel();
+
+    // Camera activation is attempted immediately. If permission is denied,
+    // the application falls back to its simulation input instead of stopping.
+    if(!S.stream && !S.cameraAutoStarting){
+      S.cameraAutoStarting=true;
+      try{
+        await enableCamera();
+      }catch(e){
+        log("Automatic camera start failed: "+(e.message||e));
+      }finally{
+        S.cameraAutoStarting=false;
+      }
+    }
+
+    guide(
+      "Assist active",
+      S.camera==="phone"
+        ? "Assist mode is on. Live camera monitoring is active."
+        : "Assist mode is on. Live camera could not be opened, so simulation mode is active.",
+      "Normal","System",true
+    );
+
+    if(S.recognition) scheduleListening();
+  }
+  function stopAssist(){
+    S.assist=false; try{S.wake?.release()}catch{} S.wake=null; $("assistBtn").textContent="Start Auto Assist"; $("assistBtn").setAttribute("aria-pressed","false");
+    stopListening(); stopGPS(); stopNavigation(); releaseCamera(); window.speechSynthesis?.cancel();
+    setState("READY"); setVoiceState("READY");
+    guide("Assist stopped","Assist mode is off.","Normal","System",true);
+  }
+  $("assistBtn").onclick=()=>S.assist?stopAssist():startAssist();
+
+  $("repeatBtn").onclick=()=>speak(S.lastSpeech,{force:true});
+
+  // --------------------------- Camera ------------------------------
+  function releaseCamera(){
+    if(S.stream){S.stream.getTracks().forEach(t=>t.stop());S.stream=null}
+    $("video").srcObject=null;$("video").classList.add("hidden");$("sim").classList.remove("hidden");
+    S.camera="simulation";$("cameraBadge").textContent="Simulation Camera";$("cameraState").textContent="Camera off";
+    $("cameraStat").textContent="Simulation";$("detState").textContent="No live camera";clearCanvas();
+  }
+  async function enableCamera(){
+    if(!navigator.mediaDevices?.getUserMedia){toast("Camera unavailable","This browser cannot access the camera.");return}
+    try{
+      const live=S.stream&&S.stream.getVideoTracks().some(t=>t.readyState==="live");
+      if(live&&S.camera==="phone"){ await loadModel(); return; }
+      if(S.stream) S.stream.getTracks().forEach(t=>t.stop());
+      S.stream=await navigator.mediaDevices.getUserMedia({
+        video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}},audio:false
+      });
+      $("video").srcObject=S.stream;
+      S.stream.getVideoTracks()[0].onended=()=>{ if(S.camera==="phone"){ releaseCamera(); guide("Camera lost","The camera stopped. Live detection is off.","High",source(),true); } }; $("video").classList.remove("hidden"); $("sim").classList.add("hidden");
+      S.camera="phone"; $("cameraBadge").textContent="Phone Camera"; $("cameraState").textContent="Live camera";
+      $("cameraStat").textContent="Phone camera"; log("PhoneCameraProvider connected.");
+      toast("Camera connected","Live phone camera is now active.");
+      await loadModel();
+    }catch(e){
+      S.camera="simulation";
+      $("cameraBadge").textContent="Simulation Camera";
+      $("cameraState").textContent="Simulation input";
+      $("cameraStat").textContent="Simulation fallback";
+      log("Camera error: "+(e.message||e));
+      toast("Camera unavailable","Live detection could not open the phone camera. Simulation mode is still running.");
+    }
+  }
+  $("cameraBtn").onclick=enableCamera;
+
+  // --------------------------- Object detection --------------------
+  async function loadModel(){
+    if(S.model||S.modelLoading||!window.cocoSsd) return;
+    S.modelLoading=true; $("modelStat").textContent="Loading…"; log("Loading COCO-SSD object detection model.");
+    try{
+      await tf.ready();
+      S.model=await cocoSsd.load({base:"mobilenet_v2"});
+      $("modelStat").textContent="Ready";
+      $("aiState").textContent="AI: ready";
+      log("COCO-SSD model ready.");
+    }catch(e){
+      $("modelStat").textContent="Unavailable"; $("aiState").textContent="AI: unavailable";
+      log("Model load error: "+(e.message||e));
+    }finally{S.modelLoading=false}
+  }
+
+  function objectPriority(p){
+    const safety=["car","bus","truck","motorcycle","bicycle","person","dog","horse"];
+    return safety.includes(p.class) ? 2 : 1;
+  }
+
+  function clearCanvas(){
+    const c=$("canvas"),ctx=c.getContext("2d");ctx.clearRect(0,0,c.width,c.height);
+  }
+
+  function drawDetections(preds){
+    const c=$("canvas"),v=$("video"),ctx=c.getContext("2d");
+    c.width=v.videoWidth||640;c.height=v.videoHeight||480;
+    ctx.clearRect(0,0,c.width,c.height);
+    ctx.lineWidth=3;ctx.font="bold 16px system-ui";
+    preds.forEach(p=>{
+      const [x,y,w,h]=p.bbox;
+      ctx.strokeStyle=p.class==="person"||["car","truck","bus","motorcycle","bicycle"].includes(p.class)?"#ff6978":"#78a9ff";
+      ctx.strokeRect(x,y,w,h);
+      const txt=`${p.class} ${p.bbox.m!=null?p.bbox.m.toFixed(1)+" m":Math.round(p.score*100)+"%"}`;
+      const tw=ctx.measureText(txt).width+14;
+      ctx.fillStyle="rgba(0,0,0,.72)";const ly=Math.max(27,y);ctx.fillRect(x,ly-27,tw,27);
+      ctx.fillStyle="#fff";ctx.fillText(txt,x+7,ly-8);
+    });
+  }
+
+  function estimatePosition(bbox, videoW){
+    const center=bbox[0]+bbox[2]/2;
+    const ratio=center/videoW;
+    if(ratio<.34) return "left";
+    if(ratio>.66) return "right";
+    return "ahead";
+  }
+
+  // ---- Distance estimation: pinhole model using typical real-world object heights ----
+  const HT={person:1.7,chair:.9,couch:.85,bench:.8,"dining table":.75,bed:.6,car:1.5,bus:3,truck:3,motorcycle:1.2,bicycle:1,dog:.5,cat:.3,horse:1.6,"potted plant":.5,tv:.5,laptop:.25,toilet:.4,"fire hydrant":.7,"stop sign":.75,"traffic light":.9,bottle:.25,backpack:.45,suitcase:.6,umbrella:.9,refrigerator:1.7,oven:.9,"parking meter":1.2};
+  function estMeters(p,W,H){
+    const f=Math.max(W,H)*0.785;            // ~65° field of view assumed
+    const m=(HT[p.class]||.6)*f/Math.max(p.bbox[3],1);
+    return Math.min(30,Math.max(.3,m));
+  }
+  function fmtM(m){
+    if(m==null) return "distance unknown";
+    if(m<1) return "less than 1 meter";
+    if(m<5){const r=Math.round(m*2)/2; return "about "+r+(r===1?" meter":" meters");}
+    if(m<20) return "about "+Math.round(m)+" meters";
+    return "over 20 meters";
+  }
+  function pathRelevant(preds){
+    const v=$("video"),W=v.videoWidth||640,H=v.videoHeight||480;
+    preds.forEach(p=>{p.bbox.m=estMeters(p,W,H);});
+    return preds.filter(p=>p.score>=.5).sort((a,b)=>a.bbox.m-b.bbox.m);
+  }
+
+  function proximityFromBox(bbox, videoHeight){
+    if(bbox && bbox.m!=null){const m=bbox.m;return m<1.5?"very close":m<3?"close":m<6?"near":"far";}
+    if(!bbox || !videoHeight) return "ahead";
+    const h=bbox[3]/videoHeight;
+    if(h>0.55) return "very close";
+    if(h>0.35) return "close";
+    if(h>0.18) return "near";
+    return "far";
+  }
+
+  function normalizedDetectionKey(pred){
+    const pos=estimatePosition(pred.bbox, $("video").videoWidth||640);
+    return `${pred.class}:${pos}`;
+  }
+
+  function shouldAnnounce(pred, position, proximity, explicit){
+    const key=`${pred.class}|${position}`;
+    const now=Date.now();
+    const threshold=pred.class==="person" || ["car","bus","truck","motorcycle","bicycle"].includes(pred.class) ? 4500 : 9000;
+    const previous=S.lastAnnouncements.get(key);
+
+    if(explicit) return true;
+    if(!previous) return true;
+    if(previous.proximity!==proximity) return true;
+    if(now-previous.time>=threshold) return true;
+    return false;
+  }
+
+  function rememberAnnouncement(pred, position, proximity){
+    S.lastAnnouncements.set(`${pred.class}|${position}`, {time:Date.now(), proximity});
+    if(S.lastAnnouncements.size>50){
+      const oldest=[...S.lastAnnouncements.entries()].sort((a,b)=>a[1].time-b[1].time)[0];
+      if(oldest) S.lastAnnouncements.delete(oldest[0]);
+    }
+  }
+
+  function automaticAnnouncement(pred, explicit=false){
+    const video=$("video");
+    const position=estimatePosition(pred.bbox, video.videoWidth||640);
+    const proximity=proximityFromBox(pred.bbox, video.videoHeight||480);
+
+    if(!shouldAnnounce(pred, position, proximity, explicit)) return false;
+    if(!explicit && lsGet('vg_verbosity')==='low' && pred.class!=='person' && !['car','bus','truck','motorcycle','bicycle'].includes(pred.class)) return false;
+
+    const urgentClasses=["car","bus","truck","motorcycle","bicycle"];
+    const isPerson=pred.class==="person";
+    const isUrgent=urgentClasses.includes(pred.class) &&
+      pred.score>=0.80 &&
+      (proximity==="very close" || proximity==="close");
+
+    const m=pred.bbox.m, dist=m!=null?`, ${fmtM(m)}`:"";
+    const veh=urgentClasses.includes(pred.class);
+    let priority="Normal";
+    if(isPerson) priority=proximity==="very close"?"High":"Normal";
+    else if(veh) priority=isUrgent?"Urgent":"High";
+    else if(position==="ahead" && (proximity==="very close"||proximity==="close")) priority="High";
+    const label=(!isPerson&&!veh&&position==="ahead"&&priority==="High")?`obstacle, ${pred.class}`:pred.class;
+    const sentence=(pred.demo?"Simulation demo. ":"")+`${label[0].toUpperCase()+label.slice(1)} ${position}${dist}.`;
+    if(!explicit && priority!=="Urgent" && window.speechSynthesis?.speaking) return false;
+
+    rememberAnnouncement(pred, position, proximity);
+
+    if(priority==="Urgent"){
+      S.lastDangerAt=Date.now();
+      safetyAlert(sentence,true);
+    } else {
+      guide(
+        isPerson ? "Person detected" : "Object detected",
+        sentence,
+        priority,
+        source(),
+        true
+      );
+    }
+    return true;
+  }
+
+  async function analyzeNow(speakResult=false){
+    const video=$("video");
+    if(S.camera!=="phone"||video.readyState<2){
+      $("detState").textContent=speakResult?"Simulation demo":"No live camera";
+      if(speakResult){
+        const simPred={class:"person",score:.91,demo:true,bbox:[0.27*640,0.34*480,0.14*640,0.28*480]};
+        simPred.bbox.m=1.8; automaticAnnouncement(simPred,true);
+      }
+      return;
+    }
+    if(!S.model){ await loadModel(); }
+    if(!S.model){
+      if(speakResult) guide("AI unavailable","The browser AI model is not available right now.","Normal",source(),true);
+      return;
+    }
+    if(S.detectionBusy) return;
+    S.detectionBusy=true;
+    setState("PROCESSING");
+    $("aiState").textContent="AI: scanning";
+
+    try{
+      const preds=await S.model.detect(
+        video,
+        20,
+        0.45
+      );
+
+      const relevant=pathRelevant(preds).slice(0,8);
+      drawDetections(relevant);
+      $("detState").textContent=relevant.length ? `${relevant.length} detected · nearest ${fmtM(relevant[0].bbox.m)}` : "Environment clear";
+
+      if(relevant.length){
+        // Stable frame count prevents one-frame false positives from being spoken immediately.
+        S.consecutiveFrames++;
+        for(const p of relevant){
+          const key=normalizedDetectionKey(p);
+          const current=S.stableDetections.get(key)||0;
+          S.stableDetections.set(key,current+1);
+        }
+
+        // Automatic speech:
+        // - explicit user request: speak top detection now
+        // - live mode: speak stable, relevant changes without flooding the user
+        if(speakResult){ describeScene(relevant,video); return; }
+        for(const q of relevant.slice(0,4)){
+          if((S.stableDetections.get(normalizedDetectionKey(q))||0)>=2 && automaticAnnouncement(q,false)) break;
+        }
+
+        // Reset stale tracking entries.
+        for(const [key,count] of S.stableDetections.entries()){
+          if(!relevant.some(p=>normalizedDetectionKey(p)===key)) S.stableDetections.delete(key);
+        }
+      }else{
+        S.consecutiveFrames=0;
+        S.stableDetections.clear();
+        if(speakResult){
+          guide("Path check","No important objects detected in the current view.","Normal",source(),true);
+        }
+      }
+    }catch(e){
+      log("Detection error: "+(e.message||e));
+      $("aiState").textContent="AI: error";
+    }finally{
+      S.detectionBusy=false;
+      if(S.assist) setState("ASSISTING");
+    }
+  }
+
+  function safetyAlert(text,speakIt){
+    navigator.vibrate?.([300,100,300]); $("alertText").textContent=text;$("alert").classList.add("show");setState("PROCESSING");
+    guide("Safety alert",text,"Urgent",source(),false);
+    if(speakIt)speak(text,{priority:"Urgent",force:true});
+    setTimeout(()=>{if(S.assist)setState("ASSISTING")},400);
+  }
+  $("detectBtn").onclick=()=>analyzeNow(true);
+  $("dismissAlert").onclick=()=>{$("alert").classList.remove("show");if(S.assist)setState("ASSISTING")};
+
+  // FULL AUTO MODE:
+  // Keep scanning the live view while Assist is active.
+  // Speech recognition pauses during speech, then resumes automatically.
+  setInterval(()=>{
+    if(!S.assist || !S.liveDetection) return;
+    
+    analyzeNow(false);
+  },1800);
+
+  // -------------------------- GPS ---------------------------------
+  function startGPS(){
+    if(!navigator.geolocation){$("gpsStat").textContent="Unavailable";return}
+    if(S.watchId!==null)return;
+    $("gpsStat").textContent="Requesting…";
+    S.watchId=navigator.geolocation.watchPosition(onGPS,onGPSError,{
+      enableHighAccuracy:true,maximumAge:2000,timeout:10000
+    });
+  }
+  function stopGPS(){if(S.watchId!==null){navigator.geolocation.clearWatch(S.watchId);S.watchId=null}}
+  function onGPS(p){
+    S.pos={lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy};
+    $("gpsStat").textContent=`Ready ±${Math.round(p.coords.accuracy)}m`;
+    if(S.destination) updateDirectGuidance();
+  }
+  function onGPSError(e){$("gpsStat").textContent=e.code===1?"Permission denied":"Unavailable";log("GPS: "+e.message)}
+  function announceLocation(){
+    if(!S.pos){startGPS();guide("Location pending","I need location permission to determine where you are.","Normal","GPS",true);return}
+    guide("Current location",`Your current coordinates are ${S.pos.lat.toFixed(5)}, ${S.pos.lon.toFixed(5)}.`,"Normal","GPS",true)
+  }
+
+  // ------------------------- Geocoding ------------------------------
+  async function geocode(query){
+    query=query.replace(/^(the )?(nearest|closest) /i,'');
+    const d=.2, vb=S.pos?`&viewbox=${S.pos.lon-d},${S.pos.lat+d},${S.pos.lon+d},${S.pos.lat-d}`:'';
+    const run=async extra=>{
+      const r=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5${vb}${extra}&q=${encodeURIComponent(query)}`,{headers:{Accept:"application/json"}});
+      if(!r.ok) throw new Error(`Place search failed (${r.status})`);
+      return r.json();
+    };
+    let a=S.pos?await run("&bounded=1"):[];
+    if(!a.length) a=await run("");
+    if(!a.length) throw new Error("I couldn't find that place.");
+    if(S.pos) a.sort((x,y)=>kmBetween(S.pos,{lat:+x.lat,lon:+x.lon})-kmBetween(S.pos,{lat:+y.lat,lon:+y.lon}));
+    return {lat:Number(a[0].lat),lon:Number(a[0].lon),name:a[0].display_name};
+  }
+
+  function kmBetween(a,b){
+    const R=6371, dLat=(b.lat-a.lat)*Math.PI/180, dLon=(b.lon-a.lon)*Math.PI/180;
+    const x=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+  }
+  function bearing(a,b){
+    const φ1=a.lat*Math.PI/180,φ2=b.lat*Math.PI/180,λ=(b.lon-a.lon)*Math.PI/180;
+    const y=Math.sin(λ)*Math.cos(φ2),x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(λ);
+    return (Math.atan2(y,x)*180/Math.PI+360)%360;
+  }
+  function cardinal(deg){
+    const arr=["north","northeast","east","southeast","south","southwest","west","northwest"];
+    return arr[Math.round(deg/45)%8];
+  }
+
+  const waitForFix=ms=>new Promise(r=>{const t=Date.now();(function chk(){ if(S.pos||Date.now()-t>ms) r(); else setTimeout(chk,250); })();});
+  async function startNavigation(rawDestination){
+    const q=rawDestination.trim();
+    if(!q)return;
+    if(!S.pos){
+      startGPS(); guide("Location","Getting your location. One moment.","Normal","Navigation",true);
+      await waitForFix(8000);
+      if(!S.pos){ guide("Location required","I could not get your location. Please allow location access and try again.","Normal","Navigation",true); return; }
+    }
+    setState("PROCESSING"); guide("Finding destination",`Searching for ${q}.`,"Normal","Navigation",true);
+    try{
+      const place=await geocode(q);
+      S.destination=place; S.route=null;
+      $("destination").value=q;
+      $("destStat").textContent=place.name.split(",").slice(0,2).join(",");
+      await tryRoute(place);
+      updateDirectGuidance();
+      clearInterval(S.navTimer); S.navTimer=setInterval(()=>updateDirectGuidance(),5000);
+      log("Destination found: "+place.name);
+    }catch(e){
+      log("Navigation geocode error: "+(e.message||e));
+      guide("Destination not found","I couldn't find that place. Try a more specific name or address.","Normal","Navigation",true);
+    }finally{if(S.assist)setState("ASSISTING")}
+  }
+  function updateDirectGuidance(){
+    if(!S.pos||!S.destination)return;
+    const d=kmBetween(S.pos,S.destination), b=bearing(S.pos,S.destination);
+    $("distStat").textContent=d<1?`${Math.round(d*1000)} m`:`${d.toFixed(2)} km`;
+    $("dirStat").textContent=cardinal(b);
+    if(d<.03){
+      guide("Destination reached","You are within approximately 30 meters of your destination.","Normal","Navigation",true);
+      stopNavigation();return;
+    }
+    // Voice only when the direction meaningfully changes or user explicitly asks.
+    if(S.route){
+      const st=S.route.steps[S.route.i];
+      if(st){
+        const dn=kmBetween(S.pos,st.loc)*1000;
+        if(dn<18){ guide("Navigation",st.text+".","Normal","Navigation",true); S.route.i++; return; }
+        if(dn<70 && S.route.warned!==S.route.i){ S.route.warned=S.route.i; guide("Navigation",`In ${Math.round(dn/5)*5} meters, ${st.text.toLowerCase()}.`,"Normal","Navigation",true); return; }
+        $("dirStat").textContent=`${cardinal(b)} · ${st.text.toLowerCase()} in ${Math.round(dn)} m`; return;
+      }
+    }
+    $("dirStat").textContent=`${cardinal(b)} · continue`;
+  }
+  function stopNavigation(){
+    clearInterval(S.navTimer);S.navTimer=null;S.destination=null;S.route=null;
+    $("destStat").textContent="None";$("distStat").textContent="—";$("dirStat").textContent="—";
+  }
+  $("navigate").onclick=()=>startNavigation($("destination").value);
+  $("destination").onkeydown=e=>{if(e.key==="Enter")startNavigation(e.target.value)};
+
+  // --------------------- Future prototype bridge ------------------
+  function togglePrototype(){
+    S.prototype=!S.prototype;
+    $("protoText").textContent=S.prototype?"Prototype: Connected":"Prototype: Simulation";
+    $("protoDot").className="dot "+(S.prototype?"g":"");
+    $("device").textContent=S.prototype?"VisionGuide Wearable (Simulated)":"Simulation Adapter";
+    $("conn").textContent=S.prototype?"Virtual / BLE-ready":"Virtual";
+    $("metaSource").textContent=source();
+    log(S.prototype?"PrototypeAdapter connected.":"PrototypeAdapter disconnected.");
+    toast(S.prototype?"Prototype connected":"Prototype disconnected",
+      S.prototype?"Application is now using the simulated wearable adapter.":"Standalone app remains available.");
+  }
+  $("connect").onclick=togglePrototype;
+
+  // ---------------------- Test scenarios ---------------------------
+  function scenario(kind){
+    if(!S.assist) startAssist();
+    const map={
+      obstacle:["Safety alert","Stop. Obstacle ahead.","Urgent"],
+      person:["Person detected","Person ahead, approximately 1.5 meters away.","High"],
+      clear:["Path clear","The path appears clear for movement.","Normal"],
+      turn:["Navigation","In approximately 10 meters, turn left.","Normal"]
+    };
+    const s=map[kind]||map.clear;
+    if(kind==="obstacle") safetyAlert(s[1],true); else guide(s[0],s[1],s[2],"Prototype Simulation",true);
+  }
+  document.querySelectorAll("[data-scenario]").forEach(b=>b.onclick=()=>scenario(b.dataset.scenario));
+
+  // ------------------------ Accessibility --------------------------
+  $("verbosity").value=lsGet("vg_verbosity")||"normal";
+  $("rate").value=lsGet("vg_rate")||"1";
+  $("verbosity").onchange=e=>lsSet("vg_verbosity",e.target.value);
+  $("rate").onchange=e=>lsSet("vg_rate",e.target.value);
+  function applyPref(btn,target,cls,key,on){target.classList.toggle(cls,on);btn.setAttribute("aria-pressed",String(on));lsSet(key,on?"1":"0");}
+  $("contrast").onclick=()=>applyPref($("contrast"),document.body,"contrast","vg_contrast",!document.body.classList.contains("contrast"));
+  $("large").onclick=()=>applyPref($("large"),document.documentElement,"big","vg_big",!document.documentElement.classList.contains("big"));
+  if(lsGet("vg_contrast")==="1")applyPref($("contrast"),document.body,"contrast","vg_contrast",true);
+  if(lsGet("vg_big")==="1")applyPref($("large"),document.documentElement,"big","vg_big",true);
+
+  // ---------------------- Network status ---------------------------
+  function network(){const on=navigator.onLine;$("netText").textContent=on?"Online":"Offline";$("netDot").className="dot "+(on?"g":"y");}
+  addEventListener("online",network);addEventListener("offline",network);
+
+  // ---------------------- Added: routing, scene, SOS ---------------
+  async function fetchRoute(a,b){
+    const r=await fetch(`https://routing.openstreetmap.de/routed-foot/route/v1/foot/${a.lon},${a.lat};${b.lon},${b.lat}?steps=true&overview=false`);
+    if(!r.ok) throw new Error("route "+r.status);
+    const rt=(await r.json()).routes?.[0]; if(!rt) throw new Error("no route");
+    const steps=rt.legs[0].steps.map(s=>{
+      const m=s.maneuver; let t;
+      if(m.type==="arrive") t="You have arrived";
+      else if(m.type==="depart") t="Walk "+cardinal(m.bearing_after||0)+(s.name?" on "+s.name:"");
+      else if(m.modifier==="uturn") t="Make a U-turn";
+      else if(m.modifier==="straight"||!m.modifier) t="Continue straight"+(s.name?" on "+s.name:"");
+      else t="Turn "+m.modifier.replace("slight ","slightly ")+(s.name?" onto "+s.name:"");
+      return {text:t,loc:{lat:m.location[1],lon:m.location[0]}};
+    });
+    return {dist:rt.distance,steps};
+  }
+  async function tryRoute(place){
+    try{
+      const rt=await fetchRoute(S.pos,place);
+      S.route={steps:rt.steps,i:1,warned:-1};
+      $("navMode").textContent="Walking route";
+      guide("Route ready",`${Math.round(rt.dist)} meters on foot. ${rt.steps[0].text}.`,"Normal","Navigation",true);
+    }catch(e){ S.route=null; $("navMode").textContent="Direct guidance"; log("Routing unavailable, using direct guidance: "+e.message); }
+  }
+  function describeScene(preds,v){
+    const parts=preds.slice(0,4).map(p=>`${p.class} ${estimatePosition(p.bbox,v.videoWidth||640)}, ${fmtM(p.bbox.m)}`);
+    guide("Scene",`I see ${parts.join("; ")}.`,"Normal",source(),true);
+  }
+  async function pathCheck(){
+    const v=$("video");
+    if(S.camera!=="phone"||v.readyState<2){ guide("Path check unavailable","The camera is off, so I cannot check the path. Do not rely on me. Say use camera to turn it on.","High",source(),true); return; }
+    if(S.detectionBusy){ setTimeout(pathCheck,600); return; }
+    if(!S.model) await loadModel();
+    if(!S.model){ guide("AI unavailable","The vision model is not available right now. Please be careful.","High",source(),true); return; }
+    S.detectionBusy=true;
+    try{
+      const W=v.videoWidth,H=v.videoHeight, preds=pathRelevant(await S.model.detect(v,12,.5));
+      drawDetections(preds);
+      const b=preds.find(p=>estimatePosition(p.bbox,W)==="ahead"&&proximityFromBox(p.bbox,H)!=="far");
+      if(!b) guide("Path check","The path ahead looks clear.","Normal",source(),true);
+      else safetyAlert(`Caution. ${b.class} ahead, ${fmtM(b.bbox.m)}.`,true);
+    }catch(e){ log("Path check error: "+(e.message||e)); guide("Path check failed","I could not check the path. Please be careful.","High",source(),true); }
+    finally{ S.detectionBusy=false; }
+  }
+  async function shareLocation(){
+    if(!S.pos){ startGPS(); guide("Location pending","I am still finding your location. Try again in a moment.","Normal","GPS",true); return; }
+    const url=`https://maps.google.com/?q=${S.pos.lat},${S.pos.lon}`, text="My current location (VisionGuide): "+url;
+    try{
+      if(navigator.share) await navigator.share({title:"My location",text});
+      else { await navigator.clipboard.writeText(text); }
+      guide("Location shared",navigator.share?"Choose a contact to send your location.":"Location link copied. Paste it into a message.","Normal","GPS",true);
+    }catch(e){ if(e&&e.name==="NotAllowedError") guide("Tap to share","Sharing needs a screen tap. Press the Share Location button.","High","GPS",true); else guide("Share cancelled","Location was not sent.","Normal","GPS",true); }
+  }
+  $("sosBtn").onclick=shareLocation;
+  document.addEventListener("visibilitychange",async()=>{ if(S.assist&&document.visibilityState==="visible"){ try{S.wake=await navigator.wakeLock?.request('screen')}catch{} } });
+
+  // --------------------------- Init --------------------------------
+  $("modelStat").textContent=window.cocoSsd?"Available":"Library unavailable";
+  async function checkPerms(){
+    if(!navigator.permissions?.query) return;
+    for(const n of ["camera","microphone","geolocation"]){
+      try{
+        const st=await navigator.permissions.query({name:n});
+        log(`Permission ${n}: ${st.state}`);
+        st.onchange=()=>log(`Permission ${n} changed: ${st.state}`);
+      }catch{}
+    }
+  }
+  checkPerms();
+  initVoice();network();
+  if(!window.isSecureContext){ log("Not a secure context: camera, microphone and GPS need HTTPS or localhost."); toast("HTTPS required","Camera, microphone and GPS only work over HTTPS or localhost."); }
+  log("VisionGuide initialized.");
+  log("Voice-first mode: core commands can be spoken.");
+  log("Application-first mode: physical hardware is not required.");
+  loadModel();
+
+})();
+</script>
+</body>
+</html>
